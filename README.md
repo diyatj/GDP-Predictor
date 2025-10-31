@@ -12,12 +12,12 @@ git clone https://github.com/diyatj/GDP-Predictor.git
 pip install streamlit
 ```
 
-2. Run code
+3. Run code
 ```bash
 streamlit run Home.py
 ```
 
-3. Open web link
+4. Open web link
 
 	Ctrl + click on Local URL to open in default browser
 
