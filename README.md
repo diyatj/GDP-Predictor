@@ -7,6 +7,10 @@ A web application that predicts the GDP of various countries using a linear regr
 ```bash
 git clone https://github.com/diyatj/GDP-Predictor.git
 ```
+2.Install dependencies
+```bash
+pip install streamlit
+```
 
 2. Run code
 ```bash
