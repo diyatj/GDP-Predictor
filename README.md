@@ -8,7 +8,7 @@ A web application that predicts the GDP of various countries using a linear regr
 git clone https://github.com/diyatj/GDP-Predictor.git
 ```
 
-2.Install dependencies
+2. Install dependencies
 ```bash
 pip install streamlit
 ```
