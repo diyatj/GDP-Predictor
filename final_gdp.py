@@ -7,7 +7,7 @@ from sklearn.metrics import r2_score, mean_squared_error
 # Minimal, reusable functions to train/evaluate the GDP model exported from the notebook.
 
 TARGET_COL = "GDPC1"
-FEATURE_COLS = ["PCEPILFE_PC1", "GPDIC1", "GCEC1", "NETEXC"]
+FEATURE_COLS = ["Real PCE", "GPDIC1", "GCEC1", "NETEXC"]
 
 _POSSIBLE_COUNTRY_COLS = [
     "country", "Country", "COUNTRY", "LOCATION", "Country Name", "country_name"
@@ -35,8 +35,7 @@ def train_and_eval(csv_path, country=None):
 
 
     # Basic cleaning: coerce numeric and drop rows with missing required fields
-    for col in [TARGET_COL] + FEATURE_COLS + ["observation_date"]:
-        # observation_date may be non-numeric (dates) but keep as string for plotting
+    for col in df.columns:
         if col != "observation_date":
             df[col] = pd.to_numeric(df[col], errors="coerce")
 

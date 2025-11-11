@@ -5,7 +5,7 @@ st.set_page_config(
     page_icon="👋",
 )
 
-st.write("# Welcome to GDPredict! 👋")
+st.write("# GDPredict")
 
 st.sidebar.success("Select a demo above.")
 
@@ -13,6 +13,18 @@ from pathlib import Path
 import pandas as pd
 import plotly.graph_objects as go
 
+
+csv_path = Path(__file__).resolve().parent / "datasets" / "US_GDP.csv"
+
+# 🧭 Debug snippet: list all CSVs the app can see
+folder = Path(__file__).resolve().parent / "datasets"
+st.write("CSV files detected in 'datasets' folder:")
+for p in folder.glob("*.csv"):
+    st.write("-", p.name)
+
+if not csv_path.exists():
+    st.error(f"CSV file not found at: {csv_path}. Put the dataset in the app folder.")
+    
 # Attempt to import the model helper module created from the notebook
 try:
     import final_gdp
@@ -27,7 +39,7 @@ except Exception:
 ## ---- GDP model integration ----
 st.markdown("## GDP Model — Actual vs Predicted")
 
-csv_path = Path(__file__).resolve().parent / "US GDP Factors(Sheet1).csv"
+csv_path = Path(__file__).resolve().parent / "datasets" / "US_GDP.csv"
 
 if not csv_path.exists():
     st.error(f"CSV file not found at: {csv_path}. Put the dataset in the app folder.")
