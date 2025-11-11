@@ -12,6 +12,12 @@ git clone https://github.com/diyatj/GDP-Predictor.git
 ```bash
 pip install streamlit
 ```
+```bash
+pip install plotly
+```
+```bash
+pip install scikit-learn
+```
 
 3. Run code
 ```bash
