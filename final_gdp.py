@@ -19,7 +19,7 @@ def train_and_eval(csv_path, country=None):
     Returns a dict with keys:
       - model, scaler, feature_cols
       - X_test, y_test, years_test, y_pred
-      - r2, rmse, coef_df
+      - r2, rmse, rmse_pct_mean, coef_df
     """
     df = pd.read_csv(csv_path)
 
@@ -32,7 +32,6 @@ def train_and_eval(csv_path, country=None):
                 break
         if country_col is not None:
             df = df[df[country_col] == country].reset_index(drop=True)
-
 
     # Basic cleaning: coerce numeric and drop rows with missing required fields
     for col in df.columns:
@@ -92,6 +91,17 @@ def train_and_eval(csv_path, country=None):
     r2 = r2_score(y_test, y_pred)
     rmse = np.sqrt(mean_squared_error(y_test, y_pred))
 
+    # ---- RMSE as percent of average actual GDP ----
+    if len(y_test) > 0:
+        avg_actual = np.mean(y_test)
+        if avg_actual != 0:
+            rmse_pct_mean = (rmse / avg_actual) * 100.0
+        else:
+            rmse_pct_mean = np.nan
+    else:
+        avg_actual = np.nan
+        rmse_pct_mean = np.nan
+
     coef_df = pd.DataFrame({
         "Feature": FEATURE_COLS,
         "Coefficient (per 1 std increase)": model.coef_
@@ -113,6 +123,7 @@ def train_and_eval(csv_path, country=None):
         "y_pred": y_pred,
         "r2": r2,
         "rmse": rmse,
+        "rmse_pct_mean": rmse_pct_mean,   # <-- percentage error here
         "coef_df": coef_df,
         "correlations": corr_df,
         "country": country,
@@ -131,13 +142,16 @@ def predictions_dataframe(result):
     return df
 
 
-def forecast_next_years(result, n_years=5, method="trend"):
+def forecast_next_years(result, n_years=5, method="trend", shock_covid=False, shock_year_index=0):
     """Forecast the target for the next n_years using the trained model.
 
     Parameters
     - result: dict returned by train_and_eval
     - n_years: how many future years to predict
     - method: 'trend' to project features using recent pct changes, 'constant' to hold last values
+    - shock_covid: if True, apply a COVID-like one-time dip
+    - shock_year_index: 0-based index within the forecast horizon where the dip is applied
+                        (0 = first forecast year, 1 = second, etc.)
 
     Returns a DataFrame with index Year and column Predicted.
     """
@@ -151,7 +165,7 @@ def forecast_next_years(result, n_years=5, method="trend"):
     if model is None or scaler is None or last_feats is None or last_year is None:
         raise ValueError("Result must contain trained model, scaler, last_features and last_year for forecasting.")
 
-    preds = []
+    preds_baseline = []
     years = []
     current_feats = last_feats.copy().astype(float)
 
@@ -159,19 +173,26 @@ def forecast_next_years(result, n_years=5, method="trend"):
         year = last_year + i
         years.append(year)
 
+        # Evolve features over time: trend or constant
         if method == "trend" and growth_rates is not None:
-            # apply growth rates multiplicatively each year
             current_feats = current_feats * (1.0 + growth_rates)
         else:
-            # constant: do not change features (keep last observed)
+            # constant: keep features at last observed levels
             current_feats = current_feats
 
         X_scaled = scaler.transform(current_feats.reshape(1, -1))
         y_pred = model.predict(X_scaled)[0]
-        preds.append(y_pred)
+        preds_baseline.append(y_pred)
+
+    preds = np.array(preds_baseline, dtype=float)
+
+    # ---- Apply a temporary COVID-like dip only to the selected forecast year ----
+    # 2020-01 -> 2020-04 ≈ -7.9%, approximate with -8%.
+    if shock_covid and 0 <= shock_year_index < len(preds):
+        covid_drop_pct = -0.08  # -8% dip
+        preds[shock_year_index] = preds[shock_year_index] * (1.0 + covid_drop_pct)
 
     return pd.DataFrame({"Predicted": preds}, index=pd.Index([str(y) for y in years], name="Year"))
-
 
 
 def get_countries(csv_path):
