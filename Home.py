@@ -2,7 +2,7 @@ import streamlit as st
 
 st.set_page_config(
     page_title="GDPredict", # Web app title
-    page_icon="👋",
+    page_icon="assets/GDPredict Logo.svg",    # Web app icon
 )
 
 st.write("# GDPredict")
