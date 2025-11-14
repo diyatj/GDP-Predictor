@@ -2,7 +2,7 @@ import streamlit as st
 
 st.set_page_config(
     page_title="GDPredict", # Web app title
-    page_icon="assets/GDPredict Logo.svg",    # Web app icon
+    page_icon="👋",
 )
 
 st.write("# GDPredict")
@@ -120,7 +120,13 @@ else:
             # Metrics
             col1, col2 = st.columns(2)
             col1.metric("R²", f"{result['r2']:.3f}")
-            col2.metric("RMSE", f"{result['rmse']:,.2f}")
+
+            # Use RMSE percentage instead of raw RMSE
+            pct = result.get("rmse_pct_mean", None)
+            if pct is not None and not pd.isna(pct):
+                col2.metric("Average Prediction Error (%)", f"{pct:.2f}%")
+            else:
+                col2.metric("Average Prediction Error (%)", "N/A")
 
             # Correlations display (between target and features for the selected data)
             if result.get("correlations") is not None:
@@ -147,8 +153,40 @@ else:
             method = st.selectbox("Forecast method", ["trend", "constant"], index=0)
             n_years = st.slider("Forecast years", min_value=1, max_value=10, value=5)
 
+            # COVID shock controls
+            st.subheader("GDP Shock Factors")
+            shock_covid = st.checkbox(
+                "COVID",
+                value=False,
+                help="Applies an ~8% one-time GDP dip in the selected forecast year, similar to the 2020 COVID recession."
+            )
+
+            shock_year_index = 0
+            if shock_covid:
+                last_year = result.get("last_year", None)
+                if last_year is not None:
+                    # Build list of actual forecast years: last_year+1, ..., last_year+n_years
+                    forecast_years = [int(last_year) + i for i in range(1, n_years + 1)]
+                    chosen_year = st.selectbox(
+                        "Choose forecast year for COVID-like shock",
+                        forecast_years,
+                        index=0
+                    )
+                    shock_year_index = forecast_years.index(chosen_year)
+                else:
+                    shock_year_index = 0  # fallback
+            else:
+                # not strictly needed, but explicit
+                shock_year_index = 0
+
             try:
-                fut_df = final_gdp.forecast_next_years(result, n_years=n_years, method=method)
+                fut_df = final_gdp.forecast_next_years(
+                    result,
+                    n_years=n_years,
+                    method=method,
+                    shock_covid=shock_covid,
+                    shock_year_index=shock_year_index,
+                )
                 # rename forecast column to avoid collision with test 'Predicted'
                 fut_df = fut_df.rename(columns={"Predicted": "Forecast"})
             except Exception as e:
