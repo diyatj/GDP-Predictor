@@ -4,6 +4,7 @@ from typing import List, Optional
 # Simple registry mapping country names to CSV filenames.
 COUNTRY_CSV_MAP = {
     "United States": "datasets/US_GDP.csv",
+    "Japan" : "datasets/Japan_GDP.csv",
 }
 
 
