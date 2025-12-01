@@ -1,0 +1,9 @@
+event,severity,gdp_impact,growth_shock,length,recovery
+short_recession,1,0.99,-0.75,4,5
+great_recession,2,0.95,-1.1,6,8
+covid,3,0.91,-5.27,1,4
+post_war,1,0.98,-1.17,4,3
+average_oil_crisis,1,0.98,-1.47,4,3
+severe_oil_crisis,2,0.95,-0.5,5,5
+war,1,1.07,0.74,8,0
+natural_disaster,1,0,-0.4,1,1

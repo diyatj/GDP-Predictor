@@ -1,0 +1,4 @@
+event,severity,gdp_impact,growth_shock,length,recovery
+great_recession,2,0.94,-1.13,7,5
+covid,1,0.91,-3.25,1,10
+natural_disaster,1,0.99,-1,1,1
