@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 
 st.set_page_config(
     page_title="GDPredict",  # Web app title
-    page_icon="👋",
+    page_icon="./assets/GDPredict Logo.svg",
 )
 
 st.write("# GDPredict")
@@ -180,25 +180,15 @@ else:
 
                 combined = pd.concat(parts, axis=0)
 
-                # Ensure index ordering by converting Year to string and sorting chronologically where possible
+               # Ensure index ordering by converting to datetime and sorting chronologically
                 try:
-                    # try to parse index as int years for sorting
-                    combined_idx = [
-                        int(str(i)[:4]) if str(i).isdigit() or str(i)[:4].isdigit() else None
-                        for i in combined.index.astype(str)
-                    ]
-                    # build a DataFrame column for sorting where None values go last
-                    sort_df = pd.DataFrame(
-                        {"year_sort": [v if v is not None else 10**9 for v in combined_idx]},
-                        index=combined.index,
-                    )
-                    combined = (
-                        combined.assign(_sort=sort_df["year_sort"])
-                        .sort_values("_sort")
-                        .drop(columns=["_sort"])
-                    )
+                    # Try to interpret the existing index as dates (e.g. 2018-01-01, 2020-04-01)
+                    combined.index = pd.to_datetime(combined.index)
+                    combined = combined.sort_index()
                 except Exception:
-                    pass
+                    # Fallback: just sort by the raw index values as strings
+                    combined = combined.sort_index()
+
 
                 # Plot combined results with Plotly for clearer legends and styling
                 try:
