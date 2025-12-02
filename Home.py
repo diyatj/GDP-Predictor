@@ -164,8 +164,77 @@ else:
                 )
                 # rename forecast column to avoid collision with test 'Predicted'
                 fut_df = fut_df.rename(columns={"Predicted": "Forecast"})
+
+                if pred_df is not None and not pred_df.empty and fut_df is not None and not fut_df.empty:
+                    # Last red point
+                    last_pred_date = pred_df.index.max()
+                    last_pred_val = pred_df.loc[last_pred_date, "Predicted"]
+
+                    # First green point
+                    first_forecast_date = fut_df.index.min()
+
+                    # If there is a time gap but you still want a visible connection,
+                    # prepend a row at the last_pred_date with the last red y-value
+                    if first_forecast_date > last_pred_date:
+                        extra = pd.DataFrame(
+                            {"Forecast": [last_pred_val]},
+                            index=[last_pred_date],
+                        )
+                        fut_df = pd.concat([extra, fut_df]).sort_index()
+
+
+                # 🔗 Make forecast dates continue exactly from last Predicted date
+                try:
+                    # Ensure datetime index
+                    if pred_df is not None and not pred_df.empty:
+                        pred_df.index = pd.to_datetime(pred_df.index)
+                        last_pred_date = pred_df.index.max()
+                    else:
+                        last_pred_date = None
+
+                    fut_df.index = pd.to_datetime(fut_df.index)
+
+                    if last_pred_date is not None and not fut_df.empty:
+                        # Infer the historical frequency (quarterly for US_GDP.csv)
+                        freq = pd.infer_freq(pred_df.index) or "QS"
+
+                        # First forecast point is next period after last_pred_date
+                        first_forecast_date = last_pred_date + pd.tseries.frequencies.to_offset(freq)
+
+                        # Rebuild forecast index so it follows immediately after the red line
+                        fut_df.index = pd.date_range(
+                            start=first_forecast_date,
+                            periods=len(fut_df),
+                            freq=freq,
+                        )
+                except Exception:
+                    pass
+
             except Exception:
                 fut_df = None
+
+
+            except Exception:
+                fut_df = None
+
+
+                # 🔗 Make sure forecast dates start right after last prediction date
+                try:
+                    # Ensure both indexes are datetime so they sit on same axis
+                    if pred_df is not None:
+                        pred_df.index = pd.to_datetime(pred_df.index)
+                    fut_df.index = pd.to_datetime(fut_df.index)
+
+                    if pred_df is not None:
+                        last_pred_date = pred_df.index.max()
+                        # Only keep forecast points strictly after the last predicted date
+                        fut_df = fut_df[fut_df.index > last_pred_date]
+                except Exception:
+                    # If anything goes wrong, fall back to original fut_df
+                    pass
+            except Exception:
+                fut_df = None
+
 
             # Combine and plot
             if pred_df is None and fut_df is None:
@@ -224,7 +293,7 @@ else:
                                 y=combined["Forecast"],
                                 name="Forecast (next years)",
                                 mode="lines+markers",
-                                line=dict(width=2, dash="dash"),
+                                line=dict(width=2),
                             )
                         )
                     fig.update_layout(
