@@ -1,0 +1,17 @@
+[server]
+enableStaticServing = true
+
+[[theme.fontFaces]]
+family = "CMU Serif"
+url = "./assets/CMU Serif Roman.ttf"
+style = "normal"
+weight = 400
+
+[[theme.fontFaces]]
+family = "CMU Serif"
+url = "./assets/CMU Serif Roman.ttf"
+style = "normal"
+weight = 800
+
+[theme]
+headingFont = "CMU Serif"
