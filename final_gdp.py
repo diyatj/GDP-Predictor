@@ -83,6 +83,7 @@ def train_and_eval(csv_path, country=None):
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
+    
 
     model = LinearRegression()
     model.fit(X_train_scaled, y_train)
@@ -90,6 +91,7 @@ def train_and_eval(csv_path, country=None):
 
     r2 = r2_score(y_test, y_pred)
     rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+
 
     # ---- RMSE as percent of average actual GDP ----
     if len(y_test) > 0:
@@ -142,18 +144,16 @@ def predictions_dataframe(result):
     return df
 
 
-def forecast_next_years(result, n_years=5, method="trend", shock_covid=False, shock_year_index=0):
-    """Forecast the target for the next n_years using the trained model.
+def forecast_next_quarters(result, n_quarters=5, method="trend", shock_quarter_index=0):
+    """Forecast the target for the next n_quarters using the trained model.
 
     Parameters
     - result: dict returned by train_and_eval
-    - n_years: how many future years to predict
+    - n_quarters: how many future quarters to predict
     - method: 'trend' to project features using recent pct changes, 'constant' to hold last values
-    - shock_covid: if True, apply a COVID-like one-time dip
-    - shock_year_index: 0-based index within the forecast horizon where the dip is applied
-                        (0 = first forecast year, 1 = second, etc.)
+    - shock_quarter_index: 0-based index within the forecast horizon where shock is applied
 
-    Returns a DataFrame with index Year and column Predicted.
+    Returns a DataFrame with index as dates and column Predicted.
     """
     model = result.get("model")
     scaler = result.get("scaler")
@@ -166,12 +166,12 @@ def forecast_next_years(result, n_years=5, method="trend", shock_covid=False, sh
         raise ValueError("Result must contain trained model, scaler, last_features and last_year for forecasting.")
 
     preds_baseline = []
-    years = []
+    quarters = []
     current_feats = last_feats.copy().astype(float)
 
-    for i in range(1, n_years + 1):
-        year = last_year + i
-        years.append(year)
+    for i in range(1, n_quarters + 1):
+        quarter = last_year + (i / 4.0)
+        quarters.append(quarter)
 
         # Evolve features over time: trend or constant
         if method == "trend" and growth_rates is not None:
@@ -186,13 +186,17 @@ def forecast_next_years(result, n_years=5, method="trend", shock_covid=False, sh
 
     preds = np.array(preds_baseline, dtype=float)
 
-    # ---- Apply a temporary COVID-like dip only to the selected forecast year ----
-    # 2020-01 -> 2020-04 ≈ -7.9%, approximate with -8%.
-    if shock_covid and 0 <= shock_year_index < len(preds):
-        covid_drop_pct = -0.08  # -8% dip
-        preds[shock_year_index] = preds[shock_year_index] * (1.0 + covid_drop_pct)
+    # Format quarters as dates: 2026-01-01, 2026-04-01, 2026-07-01, 2026-10-01
+    quarter_dates = []
+    for q in quarters:
+        year = int(q)
+        quarter_num = int(round((q - year) * 4)) + 1
+        # Map quarter number to month: Q1->01, Q2->04, Q3->07, Q4->10
+        month = (quarter_num - 1) * 3 + 1
+        date_str = f"{year}-{month:02d}-01"
+        quarter_dates.append(date_str)
 
-    return pd.DataFrame({"Predicted": preds}, index=pd.Index([str(y) for y in years], name="Year"))
+    return pd.DataFrame({"Predicted": preds}, index=pd.Index(quarter_dates, name="Date"))
 
 
 def get_countries(csv_path):
@@ -206,3 +210,84 @@ def get_countries(csv_path):
             vals = sorted(df[c].dropna().unique().tolist())
             return vals
     return []
+
+
+def load_events(events_csv_path):
+    """Load events from a country-specific events CSV.
+    
+    Returns a DataFrame with columns: event, severity, gdp_impact, growth_shock, length, recovery.
+    Returns empty DataFrame if file does not exist.
+    """
+    try:
+        df = pd.read_csv(events_csv_path)
+        return df
+    except Exception:
+        return pd.DataFrame(columns=["event", "severity", "gdp_impact", "growth_shock", "length", "recovery"])
+
+
+def apply_event_shock(preds, event_row, shock_year_index, growth_rates=None, baseline_gdp=None):
+    """Apply a complete event shock to predictions with proper recovery.
+    
+    Parameters:
+    - preds: array of predictions (yearly forecasts)
+    - event_row: a row from the events DataFrame
+    - shock_year_index: 0-based index within predictions to apply the shock
+    - growth_rates: baseline growth rates for recovery calculation
+    - baseline_gdp: baseline GDP before shock (for recovery target)
+    
+    Applies:
+    1. gdp_impact: multiplier to GDP in shock year
+    2. growth_shock: reduced growth rate for 'length' periods
+    3. recovery: periods to gradually return to baseline growth (and GDP level)
+    
+    Returns: modified predictions array
+    """
+    preds = np.array(preds, dtype=float).copy()
+    
+    if shock_year_index >= len(preds):
+        return preds
+    
+    # 1. Apply immediate GDP impact multiplier
+    gdp_impact = float(event_row.get("gdp_impact", 1.0))
+    preds[shock_year_index] = preds[shock_year_index] * gdp_impact
+    gdp_after_shock = preds[shock_year_index]
+    
+    # 2. Apply growth_shock for 'length' periods after the shock
+    growth_shock = float(event_row.get("growth_shock", 0.0)) / 100.0  # Convert percentage to decimal
+    length = int(event_row.get("length", 0))
+    recovery = int(event_row.get("recovery", 0))
+    baseline_growth = np.mean(growth_rates) if growth_rates is not None else 0.01  # Default 1% if no growth_rates
+    
+    # Apply reduced growth for shock duration (length periods)
+    current_gdp = gdp_after_shock
+    for i in range(1, length + 1):
+        shock_idx = shock_year_index + i
+        if shock_idx < len(preds):
+            # Apply shock growth rate
+            current_gdp = current_gdp * (1.0 + growth_shock)
+            preds[shock_idx] = current_gdp
+    
+    # 3. Apply recovery: gradually return to baseline growth
+    # After length periods, start blending back to baseline growth
+    if recovery > 0:
+        recovery_start_idx = shock_year_index + length
+        
+        for i in range(1, recovery + 1):
+            recovery_idx = recovery_start_idx + i
+            if recovery_idx < len(preds):
+                # Blend between shock growth and baseline growth over recovery period
+                # Start at shock growth, end at baseline growth
+                blend_factor = i / recovery  # 0 to 1 over recovery period
+                blended_growth = growth_shock + blend_factor * (baseline_growth - growth_shock)
+                current_gdp = current_gdp * (1.0 + blended_growth)
+                preds[recovery_idx] = current_gdp
+    
+    # After recovery period, apply baseline growth to remaining periods
+    final_recovery_idx = shock_year_index + length + recovery
+    if final_recovery_idx < len(preds):
+        for idx in range(final_recovery_idx, len(preds)):
+            if idx > 0:
+                current_gdp = preds[idx - 1] * (1.0 + baseline_growth)
+                preds[idx] = current_gdp
+    
+    return preds

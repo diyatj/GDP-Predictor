@@ -6,7 +6,11 @@ import plotly.graph_objects as go
 st.set_page_config(
     page_title="GDPredict",  # Web app title
     page_icon="👋",
+    layout="wide",  # Use wide layout for sidebar
 )
+
+# Setup sidebar
+st.sidebar.title("⚙️ Simulation Settings")
 
 st.write("# GDPredict")
 
@@ -124,46 +128,128 @@ else:
             except Exception:
                 pred_df = None
 
-            # Forecast controls
-            method = st.selectbox("Forecast method", ["trend", "constant"], index=0)
-            n_years = st.slider("Forecast years", min_value=1, max_value=10, value=5)
+            st.sidebar.subheader("Forecast Settings")
+            method = st.sidebar.selectbox("Forecast method", ["trend", "constant"], index=0)
+            n_quarters = st.sidebar.slider("Forecast quarters", min_value=1, max_value=20, value=8)
 
-            # COVID shock controls
-            st.subheader("GDP Shock Factors")
-            shock_covid = st.checkbox(
-                "COVID",
-                value=False,
-                help="Applies an ~8% one-time GDP dip in the selected forecast year, similar to the 2020 COVID recession.",
-            )
+            # Event shock controls in sidebar
+            st.sidebar.subheader("Shock Factors")
+            
+            #st.sidebar.caption(
+            #   "Feature growth uses the average pct change of the last 3 observations:\n"
+            #    "pct_change_t = (x_t - x_{t-1}) / x_{t-1}; "
+            #    "g = mean of the last 3 pct_change values; "
+            #    "projection: x_next = x_current * (1 + g)."
+            #)
 
-            shock_year_index = 0
-            if shock_covid:
-                last_year = result.get("last_year", None)
-                if last_year is not None:
-                    # Build list of actual forecast years: last_year+1, ..., last_year+n_years
-                    forecast_years = [int(last_year) + i for i in range(1, n_years + 1)]
-                    chosen_year = st.selectbox(
-                        "Choose forecast year for shock",
-                        forecast_years,
-                        index=0,
+            # Load events for selected country
+            events_csv = None
+            if registry_countries and selected_country != PLACEHOLDER:
+                try:
+                    events_csv = country_registry.get_events_csv_for_country(selected_country)
+                except Exception:
+                    events_csv = None
+            
+            events_df = pd.DataFrame()
+            if events_csv and events_csv.exists():
+                try:
+                    events_df = final_gdp.load_events(str(events_csv))
+                except Exception:
+                    events_df = pd.DataFrame()
+            
+            # Display event checkboxes in sidebar
+            selected_events = {}
+            if not events_df.empty:
+                for _, row in events_df.iterrows():
+                    event_name = row.get("event", "unknown")
+                    selected_events[event_name] = st.sidebar.checkbox(
+                        f"{event_name.replace('_', ' ').title()}",
+                        value=False,
+                        help=f"GDP impact: {row.get('gdp_impact', 'N/A')} | Growth shock: {row.get('growth_shock', 'N/A')}%",
                     )
-                    shock_year_index = forecast_years.index(chosen_year)
-                else:
-                    shock_year_index = 0  # fallback
-            else:
+            
+            # Get quarter index for any selected event
+            shock_year_index = 0
+            selected_event_name = None
+            last_year = result.get("last_year", None)
+            
+            if any(selected_events.values()) and last_year is not None:
+                # At least one event is selected; ask which quarter to apply it
+                forecast_quarters = []
+                for i in range(1, n_quarters + 1):
+                    year = int(last_year) + (i // 4)
+                    quarter = (i % 4) if (i % 4) != 0 else 4
+                    forecast_quarters.append(f"{year} Q{quarter}")
+                chosen_quarter = st.sidebar.selectbox(
+                    "Shock quarter",
+                    forecast_quarters,
+                    index=0,
+                )
+                shock_year_index = forecast_quarters.index(chosen_quarter)
+                # Get the first selected event
+                selected_event_name = next(k for k, v in selected_events.items() if v)
+            elif any(selected_events.values()):
                 shock_year_index = 0
 
             # Build forecast DataFrame
             try:
-                fut_df = final_gdp.forecast_next_years(
+                fut_df = final_gdp.forecast_next_quarters(
                     result,
-                    n_years=n_years,
+                    n_quarters=n_quarters,
                     method=method,
-                    shock_covid=shock_covid,
-                    shock_year_index=shock_year_index,
+                    shock_quarter_index=shock_year_index,
                 )
                 # rename forecast column to avoid collision with test 'Predicted'
                 fut_df = fut_df.rename(columns={"Predicted": "Forecast"})
+                
+                # Apply selected event shock if any
+                if selected_event_name and not events_df.empty:
+                    event_row = events_df[events_df["event"] == selected_event_name]
+                    if not event_row.empty:
+                        forecast_values = fut_df["Forecast"].values
+                        forecast_values = final_gdp.apply_event_shock(
+                            forecast_values, 
+                            event_row.iloc[0], 
+                            shock_year_index,
+                            growth_rates=result.get("growth_rates"),
+                            baseline_gdp=result.get("y_test")[-1] if len(result.get("y_test", [])) > 0 else None
+                        )
+                        fut_df["Forecast"] = forecast_values
+
+                # 🔗 Make forecast dates continue exactly from last Predicted date
+                try:
+                    # Ensure datetime index
+                    if pred_df is not None and not pred_df.empty:
+                        pred_df.index = pd.to_datetime(pred_df.index)
+                        last_pred_date = pred_df.index.max()
+                    else:
+                        last_pred_date = None
+
+                    fut_df.index = pd.to_datetime(fut_df.index)
+
+                    if last_pred_date is not None and not fut_df.empty:
+                        # Infer the historical frequency (quarterly for US_GDP.csv)
+                        freq = pd.infer_freq(pred_df.index) or "QS"
+
+                        # First forecast point is next period after last_pred_date
+                        first_forecast_date = last_pred_date + pd.tseries.frequencies.to_offset(freq)
+
+                        # Rebuild forecast index so it follows immediately after the red line
+                        # But keep the first point at last_pred_date for connection
+                        fut_df_dates = pd.date_range(
+                            start=first_forecast_date,
+                            periods=len(fut_df) - 1,  # -1 because we'll prepend the connection point
+                            freq=freq,
+                        )
+                        fut_df.index = pd.Index([last_pred_date] + fut_df_dates.tolist())
+                except Exception:
+                    pass
+                
+                # Connect forecast to prediction by setting the first forecast value to last predicted value
+                if pred_df is not None and not pred_df.empty and fut_df is not None and not fut_df.empty:
+                    last_pred_val = pred_df.iloc[-1]["Predicted"]
+                    fut_df.iloc[0, fut_df.columns.get_loc("Forecast")] = last_pred_val
+
             except Exception:
                 fut_df = None
 
@@ -227,23 +313,34 @@ else:
                                 line=dict(width=2),
                             )
                         )
+                    
                     if "Forecast" in combined.columns:
                         fig.add_trace(
                             go.Scatter(
                                 x=x,
                                 y=combined["Forecast"],
-                                name="Forecast (next years)",
+                                name="Forecast (next quarters)",
                                 mode="lines+markers",
                                 line=dict(width=2, dash="dash"),
                             )
                         )
+                    # Determine units based on country
+                    if "United States" in selected_country or "US" in selected_country:
+                        y_label = "GDP (Billions of US Dollars)"
+                    elif "Japan" in selected_country:
+                        y_label = "GDP (Billions of Yen)"
+                    elif "Israel" in selected_country:
+                        y_label = "GDP (Millions of New Israeli Shekels)"
+                    else:
+                        y_label = "GDP"
+
                     fig.update_layout(
                         title={
                             "text": f"{selected_country} GDP",
                             "font": {"size": 28},   # make title bigger    # center title
                              },           
                         xaxis_title="Year",
-                        yaxis_title="GDP",
+                        yaxis_title=y_label,
                         legend=dict(
                             orientation="h",
                             yanchor="bottom",
