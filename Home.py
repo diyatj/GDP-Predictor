@@ -5,8 +5,7 @@ import plotly.graph_objects as go
 
 st.set_page_config(
     page_title="GDPredict",  # Web app title
-    page_icon="👋",
-    layout="wide",  # Use wide layout for sidebar
+    page_icon="./assets/GDPredict Logo.svg",
 )
 
 # Setup sidebar
@@ -201,7 +200,7 @@ else:
                 )
                 # rename forecast column to avoid collision with test 'Predicted'
                 fut_df = fut_df.rename(columns={"Predicted": "Forecast"})
-                
+
                 # Apply selected event shock if any
                 if selected_event_name and not events_df.empty:
                     event_row = events_df[events_df["event"] == selected_event_name]
@@ -253,6 +252,29 @@ else:
             except Exception:
                 fut_df = None
 
+
+            except Exception:
+                fut_df = None
+
+
+                # 🔗 Make sure forecast dates start right after last prediction date
+                try:
+                    # Ensure both indexes are datetime so they sit on same axis
+                    if pred_df is not None:
+                        pred_df.index = pd.to_datetime(pred_df.index)
+                    fut_df.index = pd.to_datetime(fut_df.index)
+
+                    if pred_df is not None:
+                        last_pred_date = pred_df.index.max()
+                        # Only keep forecast points strictly after the last predicted date
+                        fut_df = fut_df[fut_df.index > last_pred_date]
+                except Exception:
+                    # If anything goes wrong, fall back to original fut_df
+                    pass
+            except Exception:
+                fut_df = None
+
+
             # Combine and plot
             if pred_df is None and fut_df is None:
                 st.write("Couldn't build predictions or forecast.")
@@ -266,25 +288,15 @@ else:
 
                 combined = pd.concat(parts, axis=0)
 
-                # Ensure index ordering by converting Year to string and sorting chronologically where possible
+               # Ensure index ordering by converting to datetime and sorting chronologically
                 try:
-                    # try to parse index as int years for sorting
-                    combined_idx = [
-                        int(str(i)[:4]) if str(i).isdigit() or str(i)[:4].isdigit() else None
-                        for i in combined.index.astype(str)
-                    ]
-                    # build a DataFrame column for sorting where None values go last
-                    sort_df = pd.DataFrame(
-                        {"year_sort": [v if v is not None else 10**9 for v in combined_idx]},
-                        index=combined.index,
-                    )
-                    combined = (
-                        combined.assign(_sort=sort_df["year_sort"])
-                        .sort_values("_sort")
-                        .drop(columns=["_sort"])
-                    )
+                    # Try to interpret the existing index as dates (e.g. 2018-01-01, 2020-04-01)
+                    combined.index = pd.to_datetime(combined.index)
+                    combined = combined.sort_index()
                 except Exception:
-                    pass
+                    # Fallback: just sort by the raw index values as strings
+                    combined = combined.sort_index()
+
 
                 # Plot combined results with Plotly for clearer legends and styling
                 try:
@@ -321,7 +333,7 @@ else:
                                 y=combined["Forecast"],
                                 name="Forecast (next quarters)",
                                 mode="lines+markers",
-                                line=dict(width=2, dash="dash"),
+                                line=dict(width=2),
                             )
                         )
                     # Determine units based on country
