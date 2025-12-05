@@ -385,15 +385,80 @@ else:
 
             # ---- THEN the rest: correlations, coefficients, etc. ----
             # Correlations display (between target and features for the selected data)
-            if result.get("correlations") is not None:
-                with st.expander("Correlations (target vs features)"):
-                    corr = result["correlations"]
-                    st.dataframe(corr.to_frame(name="correlation"))
-                    # quick bar chart visualization
-                    try:
-                        st.bar_chart(corr)
-                    except Exception:
-                        pass
+            # if result.get("correlations") is not None:
+            #     with st.expander("Correlations (target vs features)"):
+            #         corr = result["correlations"]
+            #         st.dataframe(corr.to_frame(name="correlation"))
+            #         # quick bar chart visualization
+            #         try:
+            #             st.bar_chart(corr)
+            #         except Exception:
+            #             pass
+ 
+
+# Your metrics row (already in your code)
+            colA, colB = st.columns(2)
+
+# 🔽 Dropdown containing both explanation boxes
+            with st.expander("Stats explanation"):
+    
+                col1, col2 = st.columns(2)
+
+    # --------------------------
+    # LEFT BOX (R² Explanation)
+    # --------------------------
+                with col1:
+                        st.markdown(r"""
+        <div style="padding:15px; border-radius:10px; background-color:#f5f5f5; color:black;">
+            <h4 style="color:black;">What is R²?</h4>
+            <p style="color:black;">
+                <b>R² shows how well our model explains real GDP changes in the test data</b>.  
+                A value close to 1 means the model fits extremely well.  
+                Our model achieved an <b>R² of 0.99</b>, meaning it explains nearly all GDP variation in the test set.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+                        st.markdown(r"""
+        $$
+        R^2 = 1 -
+        \frac{
+            \sum(\text{\small GDP}_{\text{actual}} - \text{\small GDP}_{\text{predicted}})^2
+        }{
+            \sum(\text{\small GDP}_{\text{actual}} - \text{\small GDP}_{\text{mean}})^2
+        }
+        $$
+        """)
+
+    # --------------------------
+    # RIGHT BOX (RMSE Explanation)
+    # --------------------------
+                with col2:
+                    st.markdown(r"""
+        <div style="padding:15px; border-radius:10px; background-color:#f5f5f5; color:black;">
+            <h4 style="color:black;">What is Average Prediction Error?</h4>
+            <p style="color:black;">
+                <b>Average Prediction Error shows how far our predictions are from real GDP values.</b>  
+                Our model's error is <b>only 0.07%</b>, meaning the predictions are extremely close to the real data.  
+                <b>RMSE</b> measures the average difference between predicted and actual GDP.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+                    st.markdown(r"""
+        $$
+        \text{RMSE} =
+        \sqrt{
+            \frac{1}{n}
+            \sum(\text{\small GDP}_{\text{actual}} - \text{\small GDP}_{\text{predicted}})^2
+        }
+        $$
+        """)
+
+
+
+
+
 
             # Coefficients
             with st.expander("Model coefficients"):
