@@ -13,7 +13,7 @@ _POSSIBLE_COUNTRY_COLS = [
     "country", "Country", "COUNTRY", "LOCATION", "Country Name", "country_name"
 ]
 
-def train_and_eval(csv_path, country=None):
+def train_and_eval(csv_path, country=None, actual_df=None):
     """Train a linear regression on the CSV and return useful artifacts.
 
     Returns a dict with keys:
@@ -21,7 +21,14 @@ def train_and_eval(csv_path, country=None):
       - X_test, y_test, years_test, y_pred
       - r2, rmse, rmse_pct_mean, coef_df
     """
+    #makes dataframe from predicted csv for train/test
     df = pd.read_csv(csv_path)
+
+    #make dataframe for actual csv
+    if actual_df is not None:
+        actual_df = actual_df.copy()
+    else:
+        actual_df = pd.read_csv(csv_path)
 
     # If a country filter is requested and a matching column exists, apply it
     country_col = None
@@ -64,7 +71,8 @@ def train_and_eval(csv_path, country=None):
     try:
         pct = df[FEATURE_COLS].pct_change().dropna()
         if len(pct) >= 1:
-            growth_rates = pct.tail(3).mean().fillna(0).values
+            N = min(20, len(pct))
+            growth_rates = pct.tail(N).mean().fillna(0).values
         else:
             growth_rates = np.zeros(len(FEATURE_COLS))
     except Exception:
@@ -91,6 +99,7 @@ def train_and_eval(csv_path, country=None):
 
     r2 = r2_score(y_test, y_pred)
     rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+
 
 
     # ---- RMSE as percent of average actual GDP ----
@@ -123,9 +132,9 @@ def train_and_eval(csv_path, country=None):
         "y_test": y_test,
         "years_test": years_test,
         "y_pred": y_pred,
-        "r2": r2,
-        "rmse": rmse,
-        "rmse_pct_mean": rmse_pct_mean,   # <-- percentage error here
+        #"r2": r2,
+        #"rmse": rmse,
+        #"rmse_pct_mean": rmse_pct_mean,   # <-- percentage error here
         "coef_df": coef_df,
         "correlations": corr_df,
         "country": country,
@@ -138,7 +147,6 @@ def train_and_eval(csv_path, country=None):
 def predictions_dataframe(result):
     """Return a pandas DataFrame indexed by years_test with Actual and Predicted columns."""
     df = pd.DataFrame({
-        "Actual": result["y_test"],
         "Predicted": result["y_pred"]
     }, index=pd.Index(result["years_test"], name="Year"))
     return df
@@ -161,10 +169,12 @@ def forecast_next_quarters(result, n_quarters=5, method="trend", shock_quarter_i
     last_feats = result.get("last_features")
     last_year = result.get("last_year")
     growth_rates = result.get("growth_rates")
+    X_test = result.get("X_test")
+    y_test = result.get("y_test")
 
     if model is None or scaler is None or last_feats is None or last_year is None:
         raise ValueError("Result must contain trained model, scaler, last_features and last_year for forecasting.")
-
+    '''
     preds_baseline = []
     quarters = []
     current_feats = last_feats.copy().astype(float)
@@ -185,6 +195,25 @@ def forecast_next_quarters(result, n_quarters=5, method="trend", shock_quarter_i
         preds_baseline.append(y_pred)
 
     preds = np.array(preds_baseline, dtype=float)
+    '''
+    if y_test is not None and len(y_test) > 1:
+        t = np.arange(len(y_test))
+        y_pred = result["y_pred"]
+
+        m, b = np.polyfit(t, y_pred, 1)
+    else:
+        m, b = 0.0, result["y_pred"][-1]
+
+    preds = []
+    quarters = []
+    for i in range(1, n_quarters + 1):
+        t_future = len(y_test) - 1 + i
+        y_future = m * t_future + b
+        preds.append(y_future)
+
+        quarter = last_year + (i / 4.0)
+        quarters.append(quarter)
+
 
     # Format quarters as dates: 2026-01-01, 2026-04-01, 2026-07-01, 2026-10-01
     quarter_dates = []
@@ -196,7 +225,8 @@ def forecast_next_quarters(result, n_quarters=5, method="trend", shock_quarter_i
         date_str = f"{year}-{month:02d}-01"
         quarter_dates.append(date_str)
 
-    return pd.DataFrame({"Predicted": preds}, index=pd.Index(quarter_dates, name="Date"))
+    #return pd.DataFrame({"Predicted": preds}, index=pd.Index(quarter_dates, name="Date"))
+    return pd.DataFrame({"Forecast": np.array(preds, dtype=float)}, index=pd.Index(quarter_dates, name="observation_date"))
 
 
 def get_countries(csv_path):

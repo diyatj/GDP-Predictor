@@ -2,8 +2,11 @@ import streamlit as st
 from pathlib import Path
 import pandas as pd
 import plotly.graph_objects as go
+from sklearn.metrics import r2_score, mean_squared_error
+import numpy as np
 
 st.set_page_config(
+    layout="wide",
     page_title="GDPredict",  # Web app title
     page_icon="./assets/GDPredict Logo.svg",
 )
@@ -67,8 +70,16 @@ else:
             options = [PLACEHOLDER] + registry_countries
             selected_country = st.selectbox("Select a country", options)
 
+            #load actual data then trimmed data for prediction
+            actual_for_country = None if selected_country == PLACEHOLDER else country_registry.get_csv_for_country(selected_country)
+            actual_csv = actual_for_country if actual_for_country is not None else csv_path
+            if actual_csv is not None:
+                actual_df = pd.read_csv(actual_csv)
+            else:
+                actual_df = None
+
             # If a CSV is registered for the country, use it. Otherwise fall back to default CSV
-            csv_for_country = None if selected_country == PLACEHOLDER else country_registry.get_csv_for_country(selected_country)
+            csv_for_country = None if selected_country == PLACEHOLDER else country_registry.get_predict_csv_for_country(selected_country)
             effective_csv = csv_for_country if csv_for_country is not None else csv_path
             effective_csv_path = Path(effective_csv) if effective_csv is not None else csv_path
 
@@ -83,7 +94,41 @@ else:
                 with st.spinner("Training / evaluating model for selection..."):
                     try:
                         # If using per-country CSVs, don't pass a country filter to train_and_eval.
-                        result = final_gdp.train_and_eval(str(effective_csv), country=None)
+                        result = final_gdp.train_and_eval(
+                            str(effective_csv), 
+                            country=None,
+                            actual_df=actual_df
+                        )
+
+                        #Evaluation of actual gdp and predicted gdp
+                        predict_df =  pd.DataFrame({
+                            "date": result["years_test"],
+                            "predict": result["y_pred"]
+                        })
+
+                        predict_df["date"] = pd.to_datetime(predict_df["date"])
+                        actual_df["date"] = pd.to_datetime(actual_df["observation_date"])
+
+                        compare_df = pd.merge(
+                            actual_df[["date", "GDPC1"]],
+                            predict_df,
+                            on="date",
+                            how="inner"
+                        )
+
+                        compare_df.rename(columns={"GDPC1": "actual"}, inplace=True)
+
+                        #compute r2 and RMSE
+                        r2 = r2_score(compare_df["actual"], compare_df["predict"])
+                        rmse = np.sqrt(mean_squared_error(compare_df["actual"], compare_df["predict"]))
+
+                        #Normalize RMSE by dividing it by mean of actual GDP dataset
+                        if len(compare_df) > 0:
+                            avg_actual = compare_df["actual"].mean()
+                            rmse_pct_mean = (rmse / avg_actual) * 100.0
+                        else:
+                            rmse_pct_mean = np.nan
+
                     except Exception as e:
                         st.error("Error training or evaluating the model. See details below.")
                         st.exception(e)
@@ -129,10 +174,10 @@ else:
 
             st.sidebar.subheader("Forecast Settings")
             method = st.sidebar.selectbox("Forecast method", ["trend", "constant"], index=0)
-            n_quarters = st.sidebar.slider("Forecast quarters", min_value=1, max_value=20, value=8)
+            n_quarters = st.sidebar.slider("Forecast Years", min_value=1, max_value=10, value=5)
 
             # Event shock controls in sidebar
-            st.sidebar.subheader("Shock Factors")
+            st.sidebar.subheader("Exogenous Events")
             
             #st.sidebar.caption(
             #   "Feature growth uses the average pct change of the last 3 observations:\n"
@@ -175,7 +220,7 @@ else:
             if any(selected_events.values()) and last_year is not None:
                 # At least one event is selected; ask which quarter to apply it
                 forecast_quarters = []
-                for i in range(1, n_quarters + 1):
+                for i in range(1, (n_quarters*4) + 1):
                     year = int(last_year) + (i // 4)
                     quarter = (i % 4) if (i % 4) != 0 else 4
                     forecast_quarters.append(f"{year} Q{quarter}")
@@ -194,7 +239,7 @@ else:
             try:
                 fut_df = final_gdp.forecast_next_quarters(
                     result,
-                    n_quarters=n_quarters,
+                    n_quarters=(n_quarters*4),
                     method=method,
                     shock_quarter_index=shock_year_index,
                 )
@@ -275,12 +320,17 @@ else:
                 fut_df = None
 
 
+            actual_df["observation_date"] = pd.to_datetime(actual_df["observation_date"])
+            actual_plot = actual_df.set_index("date")[["GDPC1"]].rename(columns={"GDPC1": "Actual"})
+
             # Combine and plot
             if pred_df is None and fut_df is None:
                 st.write("Couldn't build predictions or forecast.")
             else:
                 # Build a combined DataFrame indexed by Year with columns: Actual, Predicted, Forecast
                 parts = []
+                if actual_plot is not None:
+                    parts.append(actual_plot)
                 if pred_df is not None:
                     parts.append(pred_df)
                 if fut_df is not None:
@@ -288,10 +338,19 @@ else:
 
                 combined = pd.concat(parts, axis=0)
 
+                start_date = "2018-01-01"
+
+                if "Forecast" in combined.columns:
+                    end_date = combined.index[combined["Forecast"].notna()].max()
+                else:
+                    end_date = combined.index.max()
+
+
                # Ensure index ordering by converting to datetime and sorting chronologically
                 try:
                     # Try to interpret the existing index as dates (e.g. 2018-01-01, 2020-04-01)
                     combined.index = pd.to_datetime(combined.index)
+                    combined = combined.groupby(combined.index).max()
                     combined = combined.sort_index()
                 except Exception:
                     # Fallback: just sort by the raw index values as strings
@@ -304,6 +363,7 @@ else:
 
                     # x values (years) as strings
                     x = combined.index.astype(str).tolist()
+                    print(combined)
 
                     if "Actual" in combined.columns:
                         fig.add_trace(
@@ -338,11 +398,11 @@ else:
                         )
                     # Determine units based on country
                     if "United States" in selected_country or "US" in selected_country:
-                        y_label = "GDP (Billions of US Dollars)"
+                        y_label = "Billions of USD"
                     elif "Japan" in selected_country:
-                        y_label = "GDP (Billions of Yen)"
+                        y_label = "Billions of Yen"
                     elif "Israel" in selected_country:
-                        y_label = "GDP (Millions of New Israeli Shekels)"
+                        y_label = "Millions of New Israeli Shekels"
                     else:
                         y_label = "GDP"
 
@@ -359,6 +419,9 @@ else:
                             y=1.02,
                             xanchor="right",
                             x=1,
+                        ),
+                        xaxis=dict(
+                            range=[start_date, end_date]
                         ),
                         template="plotly_white",
                     )
@@ -381,14 +444,13 @@ else:
 
             # ---- THEN show metrics (R² and Average Prediction Error) ----
             col1, col2 = st.columns(2)
-            col1.metric("R²", f"{result['r2']:.3f}")
+            col1.metric("R²", f"{r2:.3f}")
 
             # Use RMSE percentage instead of raw RMSE
-            pct = result.get("rmse_pct_mean", None)
-            if pct is not None and not pd.isna(pct):
-                col2.metric("Average Prediction Error (%)", f"{pct:.2f}%")
+            if rmse_pct_mean is not None and not pd.isna(rmse_pct_mean):
+                col2.metric("Normalized RMSE (%)", f"{rmse_pct_mean:.2f}%")
             else:
-                col2.metric("Average Prediction Error (%)", "N/A")
+                col2.metric("Normalized RMSE (%)", "N/A")
 
             # ---- THEN the rest: correlations, coefficients, etc. ----
             # Correlations display (between target and features for the selected data)
