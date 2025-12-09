@@ -364,7 +364,14 @@ else:
                     )
 
                     # 👇 GRAPH SHOWS FIRST (after selection)
-                    st.plotly_chart(fig, width='stretch')
+                    st.plotly_chart(
+                        fig, 
+                        config={
+                            "responsive": True,      
+                            "displayModeBar": False, 
+                        },
+                        use_container_width=True     
+                    )
                 except Exception:
                     # fallback to Streamlit chart if Plotly fails
                     st.line_chart(combined)
