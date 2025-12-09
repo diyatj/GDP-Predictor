@@ -470,7 +470,17 @@ else:
             except Exception:
                 csv_used_name = csv_path.name
 
-            caption = f"Data source: {csv_used_name}"
+            source = ""
+            if "United States" in selected_country:
+                source = "U.S. Bureau of Labor Statistics via FRED®"
+            elif "Japan" in selected_country:
+                source = "Japan Cabinet Office via FRED®"
+            elif "Israel" in selected_country:
+                source = "Israel Central Bureau of Statistics (CBS)"
+            else:
+                source = "None"
+                        
+            caption = f"Data source: {source}"
             if result.get("country"):
                 caption += f" — filtered by {result.get('country_col')} = {result.get('country')}"
             st.caption(caption)
