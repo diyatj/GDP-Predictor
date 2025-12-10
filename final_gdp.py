@@ -50,21 +50,28 @@ def train_and_eval(csv_path, country=None, actual_df=None):
     # capture last observed features and year to enable simple forecasting
     last_features = None
     last_year = None
+    last_quarter = None
     try:
         last_row = df.iloc[-1]
         last_features = last_row[FEATURE_COLS].astype(float).values
-        # try to extract a 4-digit year from observation_date
+        # try to extract a 4-digit year and quarter from observation_date
         raw = last_row["observation_date"]
         try:
-            last_year = int(str(raw)[:4])
+            last_date = pd.to_datetime(raw)
+            last_year = last_date.year
+            # Extract quarter: Q1=1, Q2=2, Q3=3, Q4=4
+            last_quarter = (last_date.month - 1) // 3 + 1
         except Exception:
             try:
-                last_year = pd.to_datetime(raw).year
+                last_year = int(str(raw)[:4])
+                last_quarter = None
             except Exception:
                 last_year = None
+                last_quarter = None
     except Exception:
         last_features = None
         last_year = None
+        last_quarter = None
 
     # compute simple recent growth rates (mean pct change over last 3 observations) per feature
     growth_rates = None
@@ -141,6 +148,7 @@ def train_and_eval(csv_path, country=None, actual_df=None):
         "country_col": country_col,
         "last_features": last_features,
         "last_year": last_year,
+        "last_quarter": last_quarter,
         "growth_rates": growth_rates,
     }
 
@@ -168,6 +176,7 @@ def forecast_next_quarters(result, n_quarters=5, return_dates=True, shock_quarte
     feature_cols = result.get("feature_cols")
     last_feats = result.get("last_features")
     last_year = result.get("last_year")
+    last_quarter = result.get("last_quarter", None)
     growth_rates = result.get("growth_rates")
     X_test = result.get("X_test")
     y_test = result.get("y_test")
@@ -217,13 +226,30 @@ def forecast_next_quarters(result, n_quarters=5, return_dates=True, shock_quarte
 
     # Format quarters as dates: 2026-01-01, 2026-04-01, 2026-07-01, 2026-10-01
     quarter_dates = []
-    for q in quarters:
-        year = int(q)
-        quarter_num = int(round((q - year) * 4)) + 1
+    
+    # If we have last_quarter info, start from the next quarter
+    if last_quarter is not None:
+        current_year = last_year
+        current_quarter = last_quarter + 1
+        if current_quarter > 4:
+            current_quarter = 1
+            current_year += 1
+    else:
+        # Fallback to old behavior if quarter info not available
+        current_year = last_year
+        current_quarter = 1
+    
+    for i in range(n_quarters):
         # Map quarter number to month: Q1->01, Q2->04, Q3->07, Q4->10
-        month = (quarter_num - 1) * 3 + 1
-        date_str = f"{year}-{month:02d}-01"
+        month = (current_quarter - 1) * 3 + 1
+        date_str = f"{current_year}-{month:02d}-01"
         quarter_dates.append(date_str)
+        
+        # Move to next quarter
+        current_quarter += 1
+        if current_quarter > 4:
+            current_quarter = 1
+            current_year += 1
     
     quarter_dates = pd.to_datetime(quarter_dates)
 

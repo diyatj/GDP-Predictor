@@ -453,6 +453,7 @@ else:
                              },           
                         xaxis_title="Year",
                         yaxis_title=y_label,
+                        dragmode="pan",
                         legend=dict(
                             orientation="h",
                             yanchor="bottom",
