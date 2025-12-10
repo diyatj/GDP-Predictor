@@ -518,13 +518,13 @@ else:
     # LEFT BOX (R² Explanation)
     # --------------------------
                 with col1:
-                        st.markdown(r"""
+                        st.markdown(f"""
         <div style="padding:15px; border-radius:10px; background-color:#f5f5f5; color:black;">
             <h4 style="color:black;">What is R²?</h4>
             <p style="color:black;">
                 <b>R² shows how well our model explains real GDP changes in the test data</b>.  
                 A value close to 1 means the model fits extremely well.  
-                Our model achieved an <b>R² of 0.99</b>, meaning it explains nearly all GDP variation in the test set.
+                Our model achieved an <b>R² of {r2:.3f}</b>, meaning it explains nearly all GDP variation in the test set.
             </p>
         </div>
         """, unsafe_allow_html=True)
@@ -544,12 +544,12 @@ else:
     # RIGHT BOX (RMSE Explanation)
     # --------------------------
                 with col2:
-                    st.markdown(r"""
+                    st.markdown(f"""
         <div style="padding:15px; border-radius:10px; background-color:#f5f5f5; color:black;">
             <h4 style="color:black;">What is Average Prediction Error?</h4>
             <p style="color:black;">
                 <b>Average Prediction Error shows how far our predictions are from real GDP values.</b>  
-                Our model's error is <b>only 0.07%</b>, meaning the predictions are extremely close to the real data.  
+                Our model's error is <b>only {rmse_pct_mean:.2f}%</b>, meaning the predictions are extremely close to the real data.  
                 <b>RMSE</b> measures the average difference between predicted and actual GDP.
             </p>
         </div>
@@ -565,14 +565,21 @@ else:
         $$
         """)
 
-
-
-
-
-
             # Coefficients
             with st.expander("Model coefficients"):
                 st.dataframe(result["coef_df"])
+                st.markdown(r"""
+            <div style="padding:15px; border-radius:10px; background-color:#f5f5f5; color:black; margin-bottom:10px;">
+                <h4 style="color:black;">What are Model Coefficients?</h4>
+                <p style="color:black;">
+                    <b>Model coefficients show how much each economic factor influences GDP.</b><br>
+                    A positive coefficient means that factor increases GDP, while a negative coefficient means it decreases GDP.<br>
+                    Larger coefficients (positive or negative) indicate stronger impacts on the economy.<br><br>
+                    Our model uses these coefficients to predict GDP by combining multiple economic indicators like 
+                    employment, consumer spending, investment, and trade data.
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
 
             # Show the CSV actually used (registry may have supplied a different file)
             try:
