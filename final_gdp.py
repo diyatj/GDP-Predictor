@@ -152,7 +152,7 @@ def predictions_dataframe(result):
     return df
 
 
-def forecast_next_quarters(result, n_quarters=5, method="trend", shock_quarter_index=0):
+def forecast_next_quarters(result, n_quarters=5, return_dates=True, shock_quarter_index=0):
     """Forecast the target for the next n_quarters using the trained model.
 
     Parameters
@@ -224,6 +224,8 @@ def forecast_next_quarters(result, n_quarters=5, method="trend", shock_quarter_i
         month = (quarter_num - 1) * 3 + 1
         date_str = f"{year}-{month:02d}-01"
         quarter_dates.append(date_str)
+    
+    quarter_dates = pd.to_datetime(quarter_dates)
 
     #return pd.DataFrame({"Predicted": preds}, index=pd.Index(quarter_dates, name="Date"))
     return pd.DataFrame({"Forecast": np.array(preds, dtype=float)}, index=pd.Index(quarter_dates, name="observation_date"))
@@ -255,7 +257,7 @@ def load_events(events_csv_path):
         return pd.DataFrame(columns=["event", "severity", "gdp_impact", "growth_shock", "length", "recovery"])
 
 
-def apply_event_shock(preds, event_row, shock_year_index, growth_rates=None, baseline_gdp=None):
+def apply_event_shock(preds, event_row, shock_year_index):
     """Apply a complete event shock to predictions with proper recovery.
     
     Parameters:
@@ -266,58 +268,61 @@ def apply_event_shock(preds, event_row, shock_year_index, growth_rates=None, bas
     - baseline_gdp: baseline GDP before shock (for recovery target)
     
     Applies:
-    1. gdp_impact: multiplier to GDP in shock year
-    2. growth_shock: reduced growth rate for 'length' periods
+    1. gdp_impact: min/max gdp impact during event
+    2. growth_shock: mean quarterly growth deviation from normal growth 
+    3. length: length of event in quarters
     3. recovery: periods to gradually return to baseline growth (and GDP level)
     
     Returns: modified predictions array
     """
+    original_preds = preds.copy()
     preds = np.array(preds, dtype=float).copy()
-    
-    if shock_year_index >= len(preds):
+    n_quarters = len(preds)
+    if shock_year_index >= n_quarters:
         return preds
     
-    # 1. Apply immediate GDP impact multiplier
-    gdp_impact = float(event_row.get("gdp_impact", 1.0))
-    preds[shock_year_index] = preds[shock_year_index] * gdp_impact
-    gdp_after_shock = preds[shock_year_index]
-    
-    # 2. Apply growth_shock for 'length' periods after the shock
-    growth_shock = float(event_row.get("growth_shock", 0.0)) / 100.0  # Convert percentage to decimal
+    #parameters
+    gdp_start = preds[shock_year_index]
+    gdp_impact_mult = float(event_row.get("gdp_impact", 1.0))
+    growth_shock = float(event_row.get("growth_shock", 0.0)) / 100.0
     length = int(event_row.get("length", 0))
     recovery = int(event_row.get("recovery", 0))
-    baseline_growth = np.mean(growth_rates) if growth_rates is not None else 0.01  # Default 1% if no growth_rates
     
-    # Apply reduced growth for shock duration (length periods)
-    current_gdp = gdp_after_shock
-    for i in range(1, length + 1):
-        shock_idx = shock_year_index + i
-        if shock_idx < len(preds):
-            # Apply shock growth rate
-            current_gdp = current_gdp * (1.0 + growth_shock)
-            preds[shock_idx] = current_gdp
-    
-    # 3. Apply recovery: gradually return to baseline growth
-    # After length periods, start blending back to baseline growth
-    if recovery > 0:
-        recovery_start_idx = shock_year_index + length
+    shock_values = []
+    current_gdp = gdp_start
+
+    for i in range(length):
+        current_gdp *= (1 + growth_shock)
+        shock_values.append(current_gdp)
         
-        for i in range(1, recovery + 1):
-            recovery_idx = recovery_start_idx + i
-            if recovery_idx < len(preds):
-                # Blend between shock growth and baseline growth over recovery period
-                # Start at shock growth, end at baseline growth
-                blend_factor = i / recovery  # 0 to 1 over recovery period
-                blended_growth = growth_shock + blend_factor * (baseline_growth - growth_shock)
-                current_gdp = current_gdp * (1.0 + blended_growth)
-                preds[recovery_idx] = current_gdp
+    if length == 0:
+        shock_values = [gdp_start * gdp_impact_mult]
+    else:
+        # Rescale the shock values so that the last one matches gdp_mult
+        final_target = gdp_start * gdp_impact_mult
+        actual_final = shock_values[-1] if shock_values else gdp_start
+
+        scale_factor = final_target / actual_final if actual_final != 0 else 1.0
+        shock_values = [v * scale_factor for v in shock_values]
+
+    # Apply the scaled shock path to predictions
+    for i, gdp_val in enumerate(shock_values):
+        idx = shock_year_index + i
+        if idx < n_quarters:
+            preds[idx] = gdp_val
+            
+    if recovery > 0:
+        recovery_start = shock_year_index + length
+        recovery_end_idx = min(shock_year_index + length + recovery, n_quarters - 1)
+        recovery_target = original_preds[recovery_end_idx]
+        
+        recovery_path = np.linspace(preds[recovery_start - 1], recovery_target, recovery + 1)[1:]
+        for i, gdp_val in enumerate(recovery_path):
+            idx = recovery_start + i
+            if idx < n_quarters:
+                preds[idx] = gdp_val
     
-    # After recovery period, apply baseline growth to remaining periods
-    final_recovery_idx = shock_year_index + length + recovery
-    if final_recovery_idx < len(preds):
-        for idx in range(final_recovery_idx, len(preds)):
-            if idx > 0:
-                current_gdp = preds[idx - 1] * (1.0 + baseline_growth)
-                preds[idx] = current_gdp
+    for idx in range(shock_year_index + length + recovery, n_quarters):
+        preds[idx] = original_preds[idx]
     
     return preds

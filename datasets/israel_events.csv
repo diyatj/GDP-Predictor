@@ -1,4 +1,4 @@
 event,severity,gdp_impact,growth_shock,length,recovery
-covid,1,0.9,-5.68,1,4
-great_recession,1,0.98,-1.05,6,4
-gaza_war,1,0.97,-0.77,8,0
+pandemic,1,0.88,-5.68,2,3
+great_recession,1,0.98,-1.05,6,3
+war,1,0.97,-0.77,8,0

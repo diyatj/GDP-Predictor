@@ -173,7 +173,6 @@ else:
                 pred_df = None
 
             st.sidebar.subheader("Forecast Settings")
-            method = st.sidebar.selectbox("Forecast method", ["trend", "constant"], index=0)
             n_quarters = st.sidebar.slider("Forecast Years", min_value=1, max_value=10, value=5)
 
             # Event shock controls in sidebar
@@ -200,52 +199,94 @@ else:
                     events_df = final_gdp.load_events(str(events_csv))
                 except Exception:
                     events_df = pd.DataFrame()
-            
+
             # Display event checkboxes in sidebar
-            selected_events = {}
             if not events_df.empty:
-                for _, row in events_df.iterrows():
-                    event_name = row.get("event", "unknown")
-                    selected_events[event_name] = st.sidebar.checkbox(
-                        f"{event_name.replace('_', ' ').title()}",
-                        value=False,
-                        help=f"GDP impact: {row.get('gdp_impact', 'N/A')} | Growth shock: {row.get('growth_shock', 'N/A')}%",
-                    )
+                real = events_df["event"].tolist() 
+                display_names = [name.replace('_', ' ').title() for name in real]
+                options = ["None"] + display_names
+                    
+                unique_key = f"single_event_radio_{selected_country}"
+                    
+                selected_display_name = st.sidebar.radio(
+                    label="Select an event",
+                    options=options,
+                    index=0,
+                    key=unique_key
+                )
+                selected_events = {}
+                if selected_display_name != "None":
+                    index = display_names.index(selected_display_name)
+                    event_name = real[index]
+                    selected_events[event_name] = True
+            
             
             # Get quarter index for any selected event
+            
+            fut_df = final_gdp.forecast_next_quarters(
+                    result,
+                    n_quarters=(n_quarters*4),
+                    
+                    return_dates=True,
+                )
+            fut_df.index = pd.to_datetime(fut_df.index)
+            
             shock_year_index = 0
-            selected_event_name = None
             last_year = result.get("last_year", None)
+            selected_event_name = None
             
             if any(selected_events.values()) and last_year is not None:
                 # At least one event is selected; ask which quarter to apply it
-                forecast_quarters = []
-                for i in range(1, (n_quarters*4) + 1):
-                    year = int(last_year) + (i // 4)
-                    quarter = (i % 4) if (i % 4) != 0 else 4
-                    forecast_quarters.append(f"{year} Q{quarter}")
-                chosen_quarter = st.sidebar.selectbox(
-                    "Shock quarter",
-                    forecast_quarters,
-                    index=0,
+                if n_quarters >= 8:
+                    end_years = 2029
+                else:
+                    end_years = max(2020, int(last_year)) + n_quarters + 1
+                available_years = list(range(max(2020, int(last_year)), end_years))
+                print(available_years)
+                chosen_year = st.sidebar.selectbox("Event year", available_years)
+                
+                #dropdown to pick quarter
+                quarter_months = {
+                    "January (Q1)": "10-01",
+                    "April (Q2)": "01-01",
+                    "July (Q3)": "04-01",
+                    "October (Q4)": "07-01",
+                }
+                chosen_month_label = st.sidebar.selectbox("Event month", list(quarter_months.keys()))
+                chosen_month = quarter_months[chosen_month_label]
+                if chosen_month == "10-01":
+                    chosen_year -= 1
+        
+                selected_date = f"{chosen_year}-{chosen_month}"
+                selected_date_ts = pd.Timestamp(selected_date)
+                
+                fut_df = final_gdp.forecast_next_quarters(
+                    result,
+                    n_quarters=(n_quarters*4),
+                    return_dates=True,
                 )
-                shock_year_index = forecast_quarters.index(chosen_quarter)
+                pred_df.index = pd.to_datetime(pred_df.index)
+                fut_df.index = pd.to_datetime(fut_df.index)
+                
+                if selected_date_ts in fut_df.index:
+                    shock_year_index = fut_df.index.get_loc(selected_date_ts)
+                else:
+                    shock_year_index = (fut_df.index >= selected_date_ts).argmax()
+                print(shock_year_index)
                 # Get the first selected event
                 selected_event_name = next(k for k, v in selected_events.items() if v)
             elif any(selected_events.values()):
                 shock_year_index = 0
+                
+            if shock_year_index > 0:
+                if "Japan" in selected_country:
+                    pass
+                else:
+                    shock_year_index -= 1
+            print(shock_year_index)
 
             # Build forecast DataFrame
             try:
-                fut_df = final_gdp.forecast_next_quarters(
-                    result,
-                    n_quarters=(n_quarters*4),
-                    method=method,
-                    shock_quarter_index=shock_year_index,
-                )
-                # rename forecast column to avoid collision with test 'Predicted'
-                fut_df = fut_df.rename(columns={"Predicted": "Forecast"})
-
                 # Apply selected event shock if any
                 if selected_event_name and not events_df.empty:
                     event_row = events_df[events_df["event"] == selected_event_name]
@@ -255,11 +296,10 @@ else:
                             forecast_values, 
                             event_row.iloc[0], 
                             shock_year_index,
-                            growth_rates=result.get("growth_rates"),
-                            baseline_gdp=result.get("y_test")[-1] if len(result.get("y_test", [])) > 0 else None
                         )
                         fut_df["Forecast"] = forecast_values
-
+                        print(fut_df)
+ 
                 # 🔗 Make forecast dates continue exactly from last Predicted date
                 try:
                     # Ensure datetime index
@@ -276,7 +316,8 @@ else:
                         freq = pd.infer_freq(pred_df.index) or "QS"
 
                         # First forecast point is next period after last_pred_date
-                        first_forecast_date = last_pred_date + pd.tseries.frequencies.to_offset(freq)
+                        first_forecast_date = last_pred_date + pd.tseries.frequencies.to_offset(freq) 
+                        print(first_forecast_date)
 
                         # Rebuild forecast index so it follows immediately after the red line
                         # But keep the first point at last_pred_date for connection
@@ -321,7 +362,7 @@ else:
 
 
             actual_df["observation_date"] = pd.to_datetime(actual_df["observation_date"])
-            actual_plot = actual_df.set_index("date")[["GDPC1"]].rename(columns={"GDPC1": "Actual"})
+            actual_plot = actual_df.set_index("observation_date")[["GDPC1"]].rename(columns={"GDPC1": "Actual"})
 
             # Combine and plot
             if pred_df is None and fut_df is None:
@@ -363,7 +404,6 @@ else:
 
                     # x values (years) as strings
                     x = combined.index.astype(str).tolist()
-                    print(combined)
 
                     if "Actual" in combined.columns:
                         fig.add_trace(
@@ -398,11 +438,11 @@ else:
                         )
                     # Determine units based on country
                     if "United States" in selected_country or "US" in selected_country:
-                        y_label = "Billions of USD"
+                        y_label = "Billions of Chained 2017 Dollars"
                     elif "Japan" in selected_country:
-                        y_label = "Billions of Yen"
+                        y_label = "Billions of Chained 2015 Yen"
                     elif "Israel" in selected_country:
-                        y_label = "Millions of New Israeli Shekels"
+                        y_label = "Millions of Chained 2020 New Israeli Shekels"
                     else:
                         y_label = "GDP"
 
@@ -425,6 +465,8 @@ else:
                         ),
                         template="plotly_white",
                     )
+                    fig.update_yaxes(tickformat=',')
+                    fig.update_traces(hovertemplate='%{x}<br>%{y:,.1f}')
 
                     # 👇 GRAPH SHOWS FIRST (after selection)
                     st.plotly_chart(
@@ -432,8 +474,7 @@ else:
                         config={
                             "responsive": True,      
                             "displayModeBar": False, 
-                        },
-                        use_container_width=True     
+                        },    
                     )
                 except Exception:
                     # fallback to Streamlit chart if Plotly fails
