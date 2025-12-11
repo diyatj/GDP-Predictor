@@ -266,25 +266,36 @@ def apply_event_shock(preds, event_row, shock_year_index):
     current_gdp = gdp_start
 
     # Generate shock path
-    for i in range(length):
-        current_gdp *= (1 + growth_shock)
-        shock_values.append(current_gdp)
-        
-    if length == 0:
-        shock_values = [gdp_start * gdp_impact_mult]
+    if gdp_impact_mult > 0:
+        for i in range(length):
+            current_gdp *= (1 + growth_shock)
+            shock_values.append(current_gdp)
+            
+        if length == 0:
+            shock_values = [gdp_start * gdp_impact_mult]
+        else:
+            # Rescale the shock values so that the last one matches gdp_mult
+            final_target = gdp_start * gdp_impact_mult
+            actual_final = shock_values[-1] 
+            
+            correction = final_target - actual_final
+
+            #scale_factor = final_target / actual_final if actual_final != 0 else 1.0
+            shock_values = [v + correction * ((i+1) / length) for i,v in enumerate(shock_values)]
+
+        # Apply the scaled shock path to predictions
+        for i, gdp_val in enumerate(shock_values):
+            idx = shock_year_index + i
+            if idx < n_quarters:
+                preds[idx] = gdp_val
     else:
-        # Rescale the shock values so that the last one matches gdp_mult
-        final_target = gdp_start * gdp_impact_mult
-        actual_final = shock_values[-1] if shock_values else gdp_start
-
-        scale_factor = final_target / actual_final if actual_final != 0 else 1.0
-        shock_values = [v * scale_factor for v in shock_values]
-
-    # Apply the scaled shock path to predictions
-    for i, gdp_val in enumerate(shock_values):
-        idx = shock_year_index + i
-        if idx < n_quarters:
-            preds[idx] = gdp_val
+        growth_rate = (preds[shock_year_index + 1] - preds[shock_year_index]) / preds[shock_year_index]
+        
+        for i in range(length):
+            idx = shock_year_index + i
+            if idx + 1 < len(n_quarters):
+                growth_rate += growth_shock
+                preds[idx] = growth_rate
             
     if recovery > 0:
         recovery_start = shock_year_index + length
