@@ -247,7 +247,6 @@ def load_events(events_csv_path):
 
 # Apply a single event shock to the predictions
 def apply_event_shock(preds, event_row, shock_year_index):
-
     # Keep original predictions for reference
     original_preds = preds.copy()
     preds = np.array(preds, dtype=float).copy()
@@ -289,16 +288,28 @@ def apply_event_shock(preds, event_row, shock_year_index):
             if idx < n_quarters:
                 preds[idx] = gdp_val
     else:
-        growth_rate = (preds[shock_year_index + 1] - preds[shock_year_index]) / preds[shock_year_index]
-        
+        if shock_year_index + 1 < n_quarters:
+            baseline_growth = (
+                original_preds[shock_year_index + 1] - original_preds[shock_year_index]
+            ) / original_preds[shock_year_index]
+        else:
+            baseline_growth = 0.0
+                
+        current_gdp = gdp_start
+        adjusted_growth = baseline_growth
+
         for i in range(length):
+            adjusted_growth += growth_shock      # apply shock to the growth rate
+
+            current_gdp *= (1 + adjusted_growth) # update GDP level
+
             idx = shock_year_index + i
-            if idx + 1 < len(n_quarters):
-                growth_rate += growth_shock
-                preds[idx] = growth_rate
-            
-    if recovery > 0:
-        recovery_start = shock_year_index + length
+            if idx < n_quarters:
+                preds[idx] = current_gdp
+
+                
+        if recovery > 0:
+            recovery_start = shock_year_index + length
         
         # Ensure recovery_start is within bounds
         if recovery_start >= n_quarters:
