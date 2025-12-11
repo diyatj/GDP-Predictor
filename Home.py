@@ -21,11 +21,12 @@ st.write("# GDPredict")
 csv_path = Path(__file__).resolve().parent / "datasets" / "US_GDP.csv"
 effective_csv_path = csv_path  # will be overridden if registry chooses a different file
 
-# 🧭 Debug snippet: list all CSVs the app can see
-folder = Path(__file__).resolve().parent / "datasets"
+# Debug snippet: list all CSVs the app can see
+# folder = Path(__file__).resolve().parent / "datasets"
 # for p in folder.glob("*.csv"):
 #     st.write("-", p.name)
 
+# Check if the CSV file exists
 if not csv_path.exists():
     st.error(f"CSV file not found at: {csv_path}. Put the dataset in the app folder.")
 
@@ -41,7 +42,7 @@ try:
 except Exception:
     country_registry = None
 
-## ---- GDP model integration ----
+# GDP model integration and UI
 
 if not csv_path.exists():
     st.error(f"CSV file not found at: {csv_path}. Put the dataset in the app folder.")
@@ -85,7 +86,6 @@ else:
 
             # If nothing selected yet, show a blank chart and an instruction
             if selected_country == PLACEHOLDER:
-                # st.info("Select a country from the dropdown to run the model and show results.")
                 empty_df = pd.DataFrame({"Actual": [], "Predicted": []})
                 st.line_chart(empty_df)
                 result = None
@@ -141,11 +141,13 @@ else:
                     return final_gdp.get_countries(str(p))
                 except Exception:
                     return []
-
+            
+            # erroer handling for loading countries
             countries = _get_countries_from_csv(csv_path)
             options = [PLACEHOLDER] + countries if countries else [PLACEHOLDER]
             selected_country = st.selectbox("Select country (filters dataset)", options)
 
+            # load actual data then trimmed data for prediction
             if selected_country == PLACEHOLDER:
                 # st.info("Select a country from the dropdown to run the model and show results.")
                 empty_df = pd.DataFrame({"Actual": [], "Predicted": []})
@@ -164,9 +166,10 @@ else:
                         result = None
                         effective_csv_path = csv_path
 
-        # ----- AFTER selection & training: show graph first, then metrics, then details -----
+        # AFTER selection & training: show graph first, then metrics, then details
         if result is not None:
-            # ---- Build predictions & forecast + plot FIRST ----
+
+            # Build predictions & forecast + plot FIRST
             try:
                 pred_df = final_gdp.predictions_dataframe(result)
             except Exception:
@@ -178,13 +181,7 @@ else:
             # Event shock controls in sidebar
             st.sidebar.subheader("Exogenous Events")
             
-            #st.sidebar.caption(
-            #   "Feature growth uses the average pct change of the last 3 observations:\n"
-            #    "pct_change_t = (x_t - x_{t-1}) / x_{t-1}; "
-            #    "g = mean of the last 3 pct_change values; "
-            #    "projection: x_next = x_current * (1 + g)."
-            #)
-
+        
             # Load events for selected country
             events_csv = None
             if registry_countries and selected_country != PLACEHOLDER:
@@ -222,7 +219,6 @@ else:
             
             
             # Get quarter index for any selected event
-            
             fut_df = final_gdp.forecast_next_quarters(
                     result,
                     n_quarters=(n_quarters*4),
@@ -247,15 +243,13 @@ else:
                 
                 #dropdown to pick quarter
                 quarter_months = {
-                    "January (Q1)": "10-01",
-                    "April (Q2)": "01-01",
-                    "July (Q3)": "04-01",
-                    "October (Q4)": "07-01",
+                    "January (Q1)": "01-01",
+                    "April (Q2)": "04-01",
+                    "July (Q3)": "07-01",
+                    "October (Q4)": "10-01",
                 }
                 chosen_month_label = st.sidebar.selectbox("Event month", list(quarter_months.keys()))
                 chosen_month = quarter_months[chosen_month_label]
-                if chosen_month == "10-01":
-                    chosen_year -= 1
         
                 selected_date = f"{chosen_year}-{chosen_month}"
                 selected_date_ts = pd.Timestamp(selected_date)
@@ -273,16 +267,11 @@ else:
                 else:
                     shock_year_index = (fut_df.index >= selected_date_ts).argmax()
                 print(shock_year_index)
+
                 # Get the first selected event
                 selected_event_name = next(k for k, v in selected_events.items() if v)
             elif any(selected_events.values()):
                 shock_year_index = 0
-                
-            if shock_year_index > 0:
-                if "Japan" in selected_country:
-                    pass
-                else:
-                    shock_year_index -= 1
             print(shock_year_index)
 
             # Build forecast DataFrame
@@ -334,33 +323,10 @@ else:
                 if pred_df is not None and not pred_df.empty and fut_df is not None and not fut_df.empty:
                     last_pred_val = pred_df.iloc[-1]["Predicted"]
                     fut_df.iloc[0, fut_df.columns.get_loc("Forecast")] = last_pred_val
-
             except Exception:
                 fut_df = None
 
-
-            except Exception:
-                fut_df = None
-
-
-                # 🔗 Make sure forecast dates start right after last prediction date
-                try:
-                    # Ensure both indexes are datetime so they sit on same axis
-                    if pred_df is not None:
-                        pred_df.index = pd.to_datetime(pred_df.index)
-                    fut_df.index = pd.to_datetime(fut_df.index)
-
-                    if pred_df is not None:
-                        last_pred_date = pred_df.index.max()
-                        # Only keep forecast points strictly after the last predicted date
-                        fut_df = fut_df[fut_df.index > last_pred_date]
-                except Exception:
-                    # If anything goes wrong, fall back to original fut_df
-                    pass
-            except Exception:
-                fut_df = None
-
-
+            # Prepare actual GDP data for plotting
             actual_df["observation_date"] = pd.to_datetime(actual_df["observation_date"])
             actual_plot = actual_df.set_index("observation_date")[["GDPC1"]].rename(columns={"GDPC1": "Actual"})
 
@@ -379,6 +345,7 @@ else:
 
                 combined = pd.concat(parts, axis=0)
 
+                # testing start and end date for x axis
                 start_date = "2018-01-01"
 
                 if "Forecast" in combined.columns:
@@ -469,7 +436,7 @@ else:
                     fig.update_yaxes(tickformat=',')
                     fig.update_traces(hovertemplate='%{x}<br>%{y:,.1f}')
 
-                    # 👇 GRAPH SHOWS FIRST (after selection)
+                    # GRAPH SHOWS FIRST (after selection)
                     st.plotly_chart(
                         fig, 
                         config={
@@ -484,7 +451,7 @@ else:
                 with st.expander("Prediction & Forecast numbers"):
                     st.dataframe(combined)
 
-            # ---- THEN show metrics (R² and Average Prediction Error) ----
+            # Then show metrics (R² and Average Prediction Error)
             col1, col2 = st.columns(2)
             col1.metric("R²", f"{r2:.3f}")
 
@@ -492,32 +459,14 @@ else:
             if rmse_pct_mean is not None and not pd.isna(rmse_pct_mean):
                 col2.metric("Normalized RMSE (%)", f"{rmse_pct_mean:.2f}%")
             else:
-                col2.metric("Normalized RMSE (%)", "N/A")
-
-            # ---- THEN the rest: correlations, coefficients, etc. ----
-            # Correlations display (between target and features for the selected data)
-            # if result.get("correlations") is not None:
-            #     with st.expander("Correlations (target vs features)"):
-            #         corr = result["correlations"]
-            #         st.dataframe(corr.to_frame(name="correlation"))
-            #         # quick bar chart visualization
-            #         try:
-            #             st.bar_chart(corr)
-            #         except Exception:
-            #             pass
- 
-
-# Your metrics row (already in your code)
-            colA, colB = st.columns(2)
+                col2.metric("Normalized RMSE (%)", "N/A") 
 
 # 🔽 Dropdown containing both explanation boxes
             with st.expander("Stats explanation"):
     
                 col1, col2 = st.columns(2)
 
-    # --------------------------
     # LEFT BOX (R² Explanation)
-    # --------------------------
                 with col1:
                         st.markdown(f"""
         <div style="padding:15px; border-radius:10px; background-color:#f5f5f5; color:black;">
@@ -541,9 +490,8 @@ else:
         $$
         """)
 
-    # --------------------------
+
     # RIGHT BOX (RMSE Explanation)
-    # --------------------------
                 with col2:
                     st.markdown(f"""
         <div style="padding:15px; border-radius:10px; background-color:#f5f5f5; color:black;">

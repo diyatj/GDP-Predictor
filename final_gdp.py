@@ -13,14 +13,9 @@ _POSSIBLE_COUNTRY_COLS = [
     "country", "Country", "COUNTRY", "LOCATION", "Country Name", "country_name"
 ]
 
+#Train a linear regression on the CSV and return useful artifacts.
 def train_and_eval(csv_path, country=None, actual_df=None):
-    """Train a linear regression on the CSV and return useful artifacts.
 
-    Returns a dict with keys:
-      - model, scaler, feature_cols
-      - X_test, y_test, years_test, y_pred
-      - r2, rmse, rmse_pct_mean, coef_df
-    """
     #makes dataframe from predicted csv for train/test
     df = pd.read_csv(csv_path)
 
@@ -48,6 +43,7 @@ def train_and_eval(csv_path, country=None, actual_df=None):
     df = df.dropna(subset=[TARGET_COL] + FEATURE_COLS + ["observation_date"]).reset_index(drop=True)
 
     # capture last observed features and year to enable simple forecasting
+    # It extract a 4-digit year and quarter from observation_date
     last_features = None
     last_year = None
     last_quarter = None
@@ -75,6 +71,8 @@ def train_and_eval(csv_path, country=None, actual_df=None):
 
     # compute simple recent growth rates (mean pct change over last 3 observations) per feature
     growth_rates = None
+
+    # compute percent change
     try:
         pct = df[FEATURE_COLS].pct_change().dropna()
         if len(pct) >= 1:
@@ -85,21 +83,25 @@ def train_and_eval(csv_path, country=None, actual_df=None):
     except Exception:
         growth_rates = np.zeros(len(FEATURE_COLS))
 
+    # Split into train/test (80/20 time-based split)
     split_idx = int(len(df) * 0.8)
 
+    # Prepare feature matrix and target vector
     X = df[FEATURE_COLS].values
     y = df[TARGET_COL].values
     years = df["observation_date"].astype(str).values
 
+    # Split into train and test sets
     X_train, X_test = X[:split_idx], X[split_idx:]
     y_train, y_test = y[:split_idx], y[split_idx:]
     years_test = years[split_idx:]
 
+    # Standardize features
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
     
-
+    # Train linear regression model
     model = LinearRegression()
     model.fit(X_train_scaled, y_train)
     y_pred = model.predict(X_test_scaled)
@@ -107,9 +109,7 @@ def train_and_eval(csv_path, country=None, actual_df=None):
     r2 = r2_score(y_test, y_pred)
     rmse = np.sqrt(mean_squared_error(y_test, y_pred))
 
-
-
-    # ---- RMSE as percent of average actual GDP ----
+    # RMSE as percent of average actual GDP
     if len(y_test) > 0:
         avg_actual = np.mean(y_test)
         if avg_actual != 0:
@@ -139,9 +139,6 @@ def train_and_eval(csv_path, country=None, actual_df=None):
         "y_test": y_test,
         "years_test": years_test,
         "y_pred": y_pred,
-        #"r2": r2,
-        #"rmse": rmse,
-        #"rmse_pct_mean": rmse_pct_mean,   # <-- percentage error here
         "coef_df": coef_df,
         "correlations": corr_df,
         "country": country,
@@ -152,6 +149,7 @@ def train_and_eval(csv_path, country=None, actual_df=None):
         "growth_rates": growth_rates,
     }
 
+# Create a DataFrame of predictions vs actuals
 def predictions_dataframe(result):
     """Return a pandas DataFrame indexed by years_test with Actual and Predicted columns."""
     df = pd.DataFrame({
@@ -159,18 +157,10 @@ def predictions_dataframe(result):
     }, index=pd.Index(result["years_test"], name="Year"))
     return df
 
-
+# Forecast the next n_quarters using the trained model
 def forecast_next_quarters(result, n_quarters=5, return_dates=True, shock_quarter_index=0):
-    """Forecast the target for the next n_quarters using the trained model.
-
-    Parameters
-    - result: dict returned by train_and_eval
-    - n_quarters: how many future quarters to predict
-    - method: 'trend' to project features using recent pct changes, 'constant' to hold last values
-    - shock_quarter_index: 0-based index within the forecast horizon where shock is applied
-
-    Returns a DataFrame with index as dates and column Predicted.
-    """
+    
+    # Labeling the method for feature evolution
     model = result.get("model")
     scaler = result.get("scaler")
     feature_cols = result.get("feature_cols")
@@ -181,30 +171,11 @@ def forecast_next_quarters(result, n_quarters=5, return_dates=True, shock_quarte
     X_test = result.get("X_test")
     y_test = result.get("y_test")
 
+    # Validate required components
     if model is None or scaler is None or last_feats is None or last_year is None:
         raise ValueError("Result must contain trained model, scaler, last_features and last_year for forecasting.")
-    '''
-    preds_baseline = []
-    quarters = []
-    current_feats = last_feats.copy().astype(float)
 
-    for i in range(1, n_quarters + 1):
-        quarter = last_year + (i / 4.0)
-        quarters.append(quarter)
-
-        # Evolve features over time: trend or constant
-        if method == "trend" and growth_rates is not None:
-            current_feats = current_feats * (1.0 + growth_rates)
-        else:
-            # constant: keep features at last observed levels
-            current_feats = current_feats
-
-        X_scaled = scaler.transform(current_feats.reshape(1, -1))
-        y_pred = model.predict(X_scaled)[0]
-        preds_baseline.append(y_pred)
-
-    preds = np.array(preds_baseline, dtype=float)
-    '''
+    # Generate future features by applying growth rates
     if y_test is not None and len(y_test) > 1:
         t = np.arange(len(y_test))
         y_pred = result["y_pred"]
@@ -213,6 +184,7 @@ def forecast_next_quarters(result, n_quarters=5, return_dates=True, shock_quarte
     else:
         m, b = 0.0, result["y_pred"][-1]
 
+    # Generate predictions for future quarters
     preds = []
     quarters = []
     for i in range(1, n_quarters + 1):
@@ -256,12 +228,8 @@ def forecast_next_quarters(result, n_quarters=5, return_dates=True, shock_quarte
     #return pd.DataFrame({"Predicted": preds}, index=pd.Index(quarter_dates, name="Date"))
     return pd.DataFrame({"Forecast": np.array(preds, dtype=float)}, index=pd.Index(quarter_dates, name="observation_date"))
 
-
+# Get list of unique countries from CSV
 def get_countries(csv_path):
-    """Return list of unique countries found in the CSV using common country column names.
-
-    If no country-like column is found, returns an empty list.
-    """
     df = pd.read_csv(csv_path)
     for c in _POSSIBLE_COUNTRY_COLS:
         if c in df.columns:
@@ -269,38 +237,18 @@ def get_countries(csv_path):
             return vals
     return []
 
-
+# Load events/Shock Factors from a country-specific CSV
 def load_events(events_csv_path):
-    """Load events from a country-specific events CSV.
-    
-    Returns a DataFrame with columns: event, severity, gdp_impact, growth_shock, length, recovery.
-    Returns empty DataFrame if file does not exist.
-    """
     try:
         df = pd.read_csv(events_csv_path)
         return df
     except Exception:
         return pd.DataFrame(columns=["event", "severity", "gdp_impact", "growth_shock", "length", "recovery"])
 
-
+# Apply a single event shock to the predictions
 def apply_event_shock(preds, event_row, shock_year_index):
-    """Apply a complete event shock to predictions with proper recovery.
-    
-    Parameters:
-    - preds: array of predictions (yearly forecasts)
-    - event_row: a row from the events DataFrame
-    - shock_year_index: 0-based index within predictions to apply the shock
-    - growth_rates: baseline growth rates for recovery calculation
-    - baseline_gdp: baseline GDP before shock (for recovery target)
-    
-    Applies:
-    1. gdp_impact: min/max gdp impact during event
-    2. growth_shock: mean quarterly growth deviation from normal growth 
-    3. length: length of event in quarters
-    3. recovery: periods to gradually return to baseline growth (and GDP level)
-    
-    Returns: modified predictions array
-    """
+
+    # Keep original predictions for reference
     original_preds = preds.copy()
     preds = np.array(preds, dtype=float).copy()
     n_quarters = len(preds)
@@ -317,6 +265,7 @@ def apply_event_shock(preds, event_row, shock_year_index):
     shock_values = []
     current_gdp = gdp_start
 
+    # Generate shock path
     for i in range(length):
         current_gdp *= (1 + growth_shock)
         shock_values.append(current_gdp)
@@ -339,14 +288,23 @@ def apply_event_shock(preds, event_row, shock_year_index):
             
     if recovery > 0:
         recovery_start = shock_year_index + length
-        recovery_end_idx = min(shock_year_index + length + recovery, n_quarters - 1)
-        recovery_target = original_preds[recovery_end_idx]
         
-        recovery_path = np.linspace(preds[recovery_start - 1], recovery_target, recovery + 1)[1:]
-        for i, gdp_val in enumerate(recovery_path):
-            idx = recovery_start + i
-            if idx < n_quarters:
-                preds[idx] = gdp_val
+        # Ensure recovery_start is within bounds
+        if recovery_start >= n_quarters:
+            # Event extends beyond forecast horizon; no room for recovery
+            pass
+        else:
+            recovery_end_idx = min(shock_year_index + length + recovery, n_quarters - 1)
+            recovery_target = original_preds[recovery_end_idx]
+            
+            # Use the last valid shock value as recovery starting point
+            recovery_start_value = preds[recovery_start - 1] if recovery_start > 0 else preds[0]
+            
+            recovery_path = np.linspace(recovery_start_value, recovery_target, recovery + 1)[1:]
+            for i, gdp_val in enumerate(recovery_path):
+                idx = recovery_start + i
+                if idx < n_quarters:
+                    preds[idx] = gdp_val
     
     for idx in range(shock_year_index + length + recovery, n_quarters):
         preds[idx] = original_preds[idx]
