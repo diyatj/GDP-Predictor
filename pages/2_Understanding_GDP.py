@@ -2,7 +2,7 @@ import streamlit as st
 
 st.markdown("# Understanding GDP")
 # Write GDP Equation
-st.markdown("## GDP Equation: GDP = C + I + G + (X - M)")
+st.markdown("## GDP Equation: GDP = C + I + G + NX")
 
 # Explain each component of the GDP equation
 st.write(
@@ -20,8 +20,8 @@ Government represents the money (consumption expenditure and gross investment) s
 
 Government spending becomes even more important to consider in the wake of a recession when consumer spending and business investment dramatically decline.
 
-4. Exports - Imports (X-M)
-The exports – imports piece of the equation refers to the exports of goods and services produced within the domestic economy and sold abroad, minus the imports purchased by domestic consumers. This includes all expenditures by companies geographically located within the country.
+4. Net Exports (NX)
+Net exports refers to the exports of goods and services produced within the domestic economy and sold abroad, minus the imports purchased by domestic consumers. This includes all expenditures by companies geographically located within the country.
 
 If the country’s export (X) is greater than the value of its imports (M), the net value is positive, and the country has a trade surplus. Likewise, if M is greater than X, the country is running a trade deficit.
 

@@ -176,7 +176,7 @@ else:
                 pred_df = None
 
             st.sidebar.subheader("Forecast Settings")
-            n_quarters = st.sidebar.slider("Forecast Years", min_value=1, max_value=10, value=5)
+            n_quarters = st.sidebar.slider("Forecast Years", min_value=3, max_value=10, value=5)
 
             # Event shock controls in sidebar
             st.sidebar.subheader("Exogenous Events")
@@ -206,7 +206,7 @@ else:
                 unique_key = f"single_event_radio_{selected_country}"
                     
                 selected_display_name = st.sidebar.radio(
-                    label="Select an event",
+                    label="Select an event and time for its occurrence",
                     options=options,
                     index=0,
                     key=unique_key
@@ -216,13 +216,17 @@ else:
                     index = display_names.index(selected_display_name)
                     event_name = real[index]
                     selected_events[event_name] = True
+                    row = events_df.iloc[index]
+                    st.sidebar.caption(
+                        f"**GDP Max Impact:** -{(1 - row['gdp_impact']):.2f}%| "
+                        f"**Mean Change in Growth Rate:** {row['growth_shock']}%"
+                    )
             
             
             # Get quarter index for any selected event
             fut_df = final_gdp.forecast_next_quarters(
                     result,
                     n_quarters=(n_quarters*4),
-                    
                     return_dates=True,
                 )
             fut_df.index = pd.to_datetime(fut_df.index)
@@ -233,12 +237,8 @@ else:
             
             if any(selected_events.values()) and last_year is not None:
                 # At least one event is selected; ask which quarter to apply it
-                if n_quarters >= 8:
-                    end_years = 2029
-                else:
-                    end_years = max(2020, int(last_year)) + n_quarters + 1
-                available_years = list(range(max(2020, int(last_year)), end_years))
-                print(available_years)
+                end_year = 2020 + n_quarters - 2
+                available_years = list(range(max(2020, int(last_year)), end_year + 1))
                 chosen_year = st.sidebar.selectbox("Event year", available_years)
                 
                 #dropdown to pick quarter
@@ -266,13 +266,12 @@ else:
                     shock_year_index = fut_df.index.get_loc(selected_date_ts)
                 else:
                     shock_year_index = (fut_df.index >= selected_date_ts).argmax()
-                print(shock_year_index)
 
+                shock_year_index += 1
                 # Get the first selected event
                 selected_event_name = next(k for k, v in selected_events.items() if v)
             elif any(selected_events.values()):
                 shock_year_index = 0
-            print(shock_year_index)
 
             # Build forecast DataFrame
             try:
@@ -287,7 +286,6 @@ else:
                             shock_year_index,
                         )
                         fut_df["Forecast"] = forecast_values
-                        print(fut_df)
  
                 # 🔗 Make forecast dates continue exactly from last Predicted date
                 try:
@@ -306,7 +304,6 @@ else:
 
                         # First forecast point is next period after last_pred_date
                         first_forecast_date = last_pred_date + pd.tseries.frequencies.to_offset(freq) 
-                        print(first_forecast_date)
 
                         # Rebuild forecast index so it follows immediately after the red line
                         # But keep the first point at last_pred_date for connection
@@ -448,8 +445,31 @@ else:
                     # fallback to Streamlit chart if Plotly fails
                     st.line_chart(combined)
 
-                with st.expander("Prediction & Forecast numbers"):
-                    st.dataframe(combined)
+                #Format data frame so it's zoomed in on predicted and forecast data
+                pred_start = None
+                fc_end = None
+
+                if "Predicted" in combined.columns:
+                    pred_mask = combined["Predicted"].notna()
+                    if pred_mask.any():
+                        pred_start = combined.index[pred_mask].min()
+
+                if "Forecast" in combined.columns:
+                    fc_mask = combined["Forecast"].notna()
+                    if fc_mask.any():
+                        fc_end = combined.index[fc_mask].max()
+
+                trimmed = combined.copy()
+
+                if pred_start is not None:
+                    trimmed = trimmed[trimmed.index >= pred_start]
+
+                if fc_end is not None:
+                    trimmed = trimmed[trimmed.index <= fc_end]
+
+
+                with st.expander("Actual, Predicted, and Forecasted GDP Data"):
+                    st.dataframe(trimmed)
 
             # Then show metrics (R² and Average Prediction Error)
             col1, col2 = st.columns(2)

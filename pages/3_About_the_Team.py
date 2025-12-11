@@ -21,7 +21,7 @@ team_members = [
     {
         "name": "Kayla Nguyen",
         "role": "Scribe", 
-        "description": """Design + Front end""",
+        "description": """Data + Front end""",
         "image": "Kayla.png"
     },
     {
