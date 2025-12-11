@@ -1,4 +1,4 @@
 event,severity,gdp_impact,growth_shock,length,recovery
 large_recession,2,0.94,-1.13,5,5
 pandemic,1,0.91,-3.25,2,4
-major_natural_disaster,1,0.99,-1,1,1
+major_natural_disaster,1,0.98,-1,1,1
